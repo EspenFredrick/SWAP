@@ -1,7 +1,7 @@
 # SWAP_tools: Solar Wind Advection & Prediction
 
 [![Language](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/)
-[![Field](https://img.shields.io/badge/Field-Heliophysics-orange.svg)](https://en.wikipedia.org/wiki/Heliophysics)
+[![Field](https://img.shields.io/badge/Field-Space_Physics-orange.svg)](https://wikipedia.org/wiki/Space_physics)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](https://opensource.org/licenses/MIT)
 
 **SWAP** (Solar Wind Advection & Prediction) is a Python package designed to streamline the comparison of propagation methods for solar wind plasma from L1 (Lagrangian point 1) to the Earth's **Bow Shock Nose**.
