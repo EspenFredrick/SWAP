@@ -8,21 +8,17 @@
 
 ## Background
 
-Accurately predicting when a solar wind disturbance will hit the Earth's magnetosphere is a cornerstone of Space Weather research. However, the "nose" of the bow shock is a moving target that depends on upstream dynamic pressure ($D_p$) and the Interplanetary Magnetic Field (IMF). 
+Accurately predicting when a solar wind disturbance will hit the Earth's magnetosphere is a cornerstone of Space Weather research. However, the Interplanetary Magnetic Field (IMF) may change during the transit from the L1 Lagrange point to Earth.
 
 **SWAP_tools** allows researchers to:
-1. Calculate the dynamic position of the Bow Shock.
-2. Apply different advection algorithms (Simple, Ballistic, or Phase-Front).
-3. Compare these methods against "ground truth" observations.
+1. Apply different advection algorithms to upstream solar wind (Simple, Ballistic, or MHD).
+2. Compare these methods against "in-situ" observations from ARTEMIS.
 
 ---
 
 ## Features
 
-* **Propagator Comparison:** Compare standard ballistic propagation ($t = d/v$) against more nuanced phase-front alignment methods.
-* **Bow Shock Models:** Built-in support for classic models including:
-    * *Farris & Russell (1994)*
-    * *Shue et al. (1997/1998)*
+* **Propagator Comparison:** Compare standard ballistic propagation ($t = d/v$) against more nuanced MHD methods.
 * **Coordinate Transformations:** Easy handling of GSE (Geocentric Solar Ecliptic) and GSM (Geocentric Solar Magnetospheric) coordinate systems.
 * **Time-Series Analysis:** Tools to resample and shift L1 data (ACE/DSCOVR/Wind) to the subsolar point.
 
