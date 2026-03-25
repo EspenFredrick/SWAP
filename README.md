@@ -1,4 +1,4 @@
-# SWAP_tools: Solar Wind Advection & Prediction
+# SWAP-tools: Solar Wind Advection & Prediction
 
 [![Language](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/)
 [![Field](https://img.shields.io/badge/Field-Space_Physics-orange.svg)](https://wikipedia.org/wiki/Space_physics)
