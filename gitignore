@@ -1,0 +1,25 @@
+# Data and large outputs — do not commit
+data/
+outputs/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.eggs/
+*.egg-info/
+dist/
+build/
+.env
+.venv/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# SpacePy / pyspedas download cache
+pyspedas_data/
+.spdfcdf/
+
+# OS
+.DS_Store
+Thumbs.db
