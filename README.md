@@ -32,3 +32,9 @@ Clone the repository and install via `pip`:
 git clone [https://github.com/yourusername/SWAP_tools.git](https://github.com/yourusername/SWAP_tools.git)
 cd SWAP_tools
 pip install -e .
+```
+---
+
+## Dependencies
+
+SWAP relies on BATS-R-US for MHD propagation. Please follow the configuration guide in the docs folder for more information.
