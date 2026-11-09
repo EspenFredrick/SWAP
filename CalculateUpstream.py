@@ -66,119 +66,119 @@ def reconstruct(omni, ace, wind, cols, names=None):
 event_list = pd.read_csv(args.input, delimiter=',', header=0)
 
 def process_event(e):
-    for e in range(len(event_list)):
-        say(f'Run {e + 1} out of {len(event_list)}.')
-        start = event_list['Date_Start'][e]
-        date_stop = event_list['Date_Stop'][e]
-        date_start = pd.to_datetime(start)
+    say(f'Run {e + 1} out of {len(event_list)}.')
+    start = event_list['Date_Start'][e]
+    date_stop = event_list['Date_Stop'][e]
+    date_start = pd.to_datetime(start)
 
-        date_string = date_start.strftime('%Y-%m-%d')
-        folder_path = f'./Data/Interpolated/{date_string}'
+    date_string = date_start.strftime('%Y-%m-%d')
+    folder_path = f'./Data/Interpolated/{date_string}'
 
-        print("Importing data...")
-        # Importing in CSV files generated using GetEvents.py
-        omni = pd.read_csv(f'{folder_path}/omni.csv', parse_dates=['Time'])
-        artemis = pd.read_csv(f'{folder_path}/artemis.csv', parse_dates=['Time'])
-        ace_mfi = pd.read_csv(f'{folder_path}/ace_mfi.csv', parse_dates=['Time'])
-        ace_swe = pd.read_csv(f'{folder_path}/ace_swe.csv', parse_dates=['Time'])
-        wind_mfi = pd.read_csv(f'{folder_path}/wind_mfi.csv', parse_dates=['Time'])
-        wind_swe = pd.read_csv(f'{folder_path}/wind_swe.csv', parse_dates=['Time'])
+    print("Importing data...")
+    # Importing in CSV files generated using GetEvents.py
+    omni = pd.read_csv(f'{folder_path}/omni.csv', parse_dates=['Time'])
+    artemis = pd.read_csv(f'{folder_path}/artemis.csv', parse_dates=['Time'])
+    ace_mfi = pd.read_csv(f'{folder_path}/ace_mfi.csv', parse_dates=['Time'])
+    ace_swe = pd.read_csv(f'{folder_path}/ace_swe.csv', parse_dates=['Time'])
+    wind_mfi = pd.read_csv(f'{folder_path}/wind_mfi.csv', parse_dates=['Time'])
+    wind_swe = pd.read_csv(f'{folder_path}/wind_swe.csv', parse_dates=['Time'])
 
-        # Finding the correct shift distance
-        if args.set_downstream:
-            bound_dist = np.average(omni['BSN'])
+    # Finding the correct shift distance
+    if args.set_downstream:
+        bound_dist = np.average(omni['BSN'])
 
-        # Reconstruct the OMNI magnetic field and plasma from ACE and Wind
-        print('Reconstructing upstream solar wind...')
-        mfi = reconstruct(omni, ace_mfi, wind_mfi, ['BX', 'BY', 'BZ'], ['bx', 'by', 'bz'])
-        swe = reconstruct(omni, ace_swe, wind_swe, ['VX', 'VY', 'VZ', 'Temp', 'NP'])
+    # Reconstruct the OMNI magnetic field and plasma from ACE and Wind
+    print('Reconstructing upstream solar wind...')
+    mfi = reconstruct(omni, ace_mfi, wind_mfi, ['BX', 'BY', 'BZ'], ['bx', 'by', 'bz'])
+    swe = reconstruct(omni, ace_swe, wind_swe, ['VX', 'VY', 'VZ', 'Temp', 'NP'])
 
-        # Begin main propagation script:
+    # Begin main propagation script:
 
-        # Create unified time:
-        t_swe, t_mag = swe['Time'][:], mfi['Time'][:]
-        time = f.unify_time(t_swe, t_mag)
-        time = [isoparse(t) for t in time]
+    # Create unified time:
+    t_swe, t_mag = swe['Time'][:], mfi['Time'][:]
+    time = f.unify_time(t_swe, t_mag)
+    time = [isoparse(t) for t in time]
 
-        # Convert coordinates:
-        vx, vy, vz = f.gse_to_gsm(swe['VX'][:],
-                                  swe['VY'][:],
-                                  swe['VZ'][:], swe['Time'][:])
+    # Convert coordinates:
+    vx, vy, vz = f.gse_to_gsm(swe['VX'][:],
+                              swe['VY'][:],
+                              swe['VZ'][:], swe['Time'][:])
 
-        # Convert temperature
-        temp = swe['Temp'][:]
+    # Convert temperature
+    temp = swe['Temp'][:]
 
-        # Extract plasma parameters
-        raw = {'time': time,
-               'n': f.pair(t_swe, swe['NP'][:], time, varname='n'),
-               't': f.pair(t_swe, temp, time, varname='t'),
-               'ux': f.pair(t_swe, vx, time, varname='ux'),
-               'uy': f.pair(t_swe, vy, time, varname='uy'),
-               'uz': f.pair(t_swe, vz, time, varname='uz')}
+    # Extract plasma parameters
+    raw = {'time': time,
+           'n': f.pair(t_swe, swe['NP'][:], time, varname='n'),
+           't': f.pair(t_swe, temp, time, varname='t'),
+           'ux': f.pair(t_swe, vx, time, varname='ux'),
+           'uy': f.pair(t_swe, vy, time, varname='uy'),
+           'uz': f.pair(t_swe, vz, time, varname='uz')}
 
-        # Extract magnetic field parameters:
-        for b in ['bx', 'by', 'bz']:
-            raw[b] = f.pair(t_mag, mfi[b][:], raw['time'], varname=b)
+    # Extract magnetic field parameters:
+    for b in ['bx', 'by', 'bz']:
+        raw[b] = f.pair(t_mag, mfi[b][:], raw['time'], varname=b)
 
-        keys = ['bx', 'by', 'bz', 'ux', 'uy', 'uz', 'n', 't']
-        secs = (pd.to_datetime(raw['time']) - pd.Timestamp(0)).total_seconds()  # Convert datetimes to Unix seconds, which regrid expects
-        df = GS.regrid(secs, {k: np.asarray(raw[k], dtype=float) for k in keys}, 'min', bad=-1e30)  # Resample onto a regular 1-minute grid, interpolate gaps, and mask leftover fill values
-        raw = {'time': list(df.index.to_pydatetime()), **{k: df[k].to_numpy() for k in keys}}   # Rebuild raw with the regular 1-minute times and the regridded values
+    keys = ['bx', 'by', 'bz', 'ux', 'uy', 'uz', 'n', 't']
+    secs = (pd.to_datetime(raw['time']) - pd.Timestamp(0)).total_seconds()  # Convert datetimes to Unix seconds, which regrid expects
+    df = GS.regrid(secs, {k: np.asarray(raw[k], dtype=float) for k in keys}, 'min', bad=-1e30)  # Resample onto a regular 1-minute grid, interpolate gaps, and mask leftover fill values
+    raw = {'time': list(df.index.to_pydatetime()), **{k: df[k].to_numpy() for k in keys}}   # Rebuild raw with the regular 1-minute times and the regridded values
 
-        # Pad end of input so the last real data reaches the satellite
-        dt = timedelta(minutes=1)   # Use the minute cadence
-        t_end = pd.to_datetime(omni['Time'].iloc[-1]).to_pydatetime()
-        n_pad = int((t_end - raw['time'][-1]) / dt) # Find the number of pad points needed to match OMNI
-        new_t = [raw['time'][-1] + dt * (i + 1) for i in range(n_pad)]
-        for k in keys:
-            hold = np.nanmedian(np.asarray(raw[k][-10:], dtype=float))   # Creates the pad values using the median of the last 10 values
-            raw[k] = list(raw[k]) + [hold] * n_pad  # Repeat the held value for every padded point
-        raw['time'] = list(raw['time']) + new_t # Append the padded timestamps
+    # Pad end of input so the last real data reaches the satellite
+    dt = timedelta(minutes=1)   # Use the minute cadence
+    t_end = pd.to_datetime(omni['Time'].iloc[-1]).to_pydatetime()
+    n_pad = int((t_end - raw['time'][-1]) / dt) # Find the number of pad points needed to match OMNI
+    new_t = [raw['time'][-1] + dt * (i + 1) for i in range(n_pad)]
+    for k in keys:
+        hold = np.nanmedian(np.asarray(raw[k][-10:], dtype=float))   # Creates the pad values using the median of the last 10 values
+        raw[k] = list(raw[k]) + [hold] * n_pad  # Repeat the held value for every padded point
+    raw['time'] = list(raw['time']) + new_t # Append the padded timestamps
 
-        print(f'Upstream now matches OMNI at A:{raw["time"][-1]} / O:{omni["Time"].iloc[-1]}\n'
-              f'Padded {n_pad} pts\n'
-              + ' |'.join(f'{k:>8}' for k in keys) + '\n'
-              + ' |'.join(f'{raw[k][-1]:8.3g}' for k in keys))
+    print(f'Upstream now matches OMNI at A:{raw["time"][-1]} / O:{omni["Time"].iloc[-1]}\n'
+          f'Padded {n_pad} pts\n'
+          + ' |'.join(f'{k:>8}' for k in keys) + '\n'
+          + ' |'.join(f'{raw[k][-1]:8.3g}' for k in keys))
 
-        # Create seconds-from-start time array:
-        tsec = np.array([(t - raw['time'][0]).total_seconds() for t in raw['time']])
+    # Create seconds-from-start time array:
+    tsec = np.array([(t - raw['time'][0]).total_seconds() for t in raw['time']])
 
-        say('Saving upstream solar wind...')
-        # Puts all the raw data into Upstream Dataframe
-        upstream = pd.DataFrame({
-            'Time': raw['time'],
-            'BX': raw['bx'],
-            'BY': raw['by'],
-            'BZ': raw['bz'],
-            'VX': raw['ux'],
-            'VY': raw['uy'],
-            'VZ': raw['uz'],
-            'N': raw['n'],
-            'T': raw['t']
+    say('Saving upstream solar wind...')
+    # Puts all the raw data into Upstream Dataframe
+    upstream = pd.DataFrame({
+        'Time': raw['time'],
+        'BX': raw['bx'],
+        'BY': raw['by'],
+        'BZ': raw['bz'],
+        'VX': raw['ux'],
+        'VY': raw['uy'],
+        'VZ': raw['uz'],
+        'N': raw['n'],
+        'T': raw['t']
 
-        }, columns=['Time', 'BX', 'BY', 'BZ', 'VX', 'VY', 'VZ', 'N', 'T']).replace(to_replace=[-1.00000E+31], value=np.nan)
+    }, columns=['Time', 'BX', 'BY', 'BZ', 'VX', 'VY', 'VZ', 'N', 'T']).replace(to_replace=[-1.00000E+31], value=np.nan)
 
-        uptime = pd.to_datetime(upstream['Time'])   # Make a copy of the time column as a list of datetime objs
-        date_parts = (uptime.dt.strftime('%Y %m %d %H %M %S %f').str.split(' ', expand=True))   # Create a string with the parts and then split the string based on whitespace
-        date_parts.columns = ['year', 'month', 'day', 'hour', 'min', 'sec', 'ms']
-        date_parts['ms'] = date_parts['ms'].str[:-4]  # Truncate the milliseconds
-        upstream_sep = pd.concat([date_parts, upstream.drop(columns='Time')], axis=1)   # Copy "upstream", drop the time col, and add the parts
+    uptime = pd.to_datetime(upstream['Time'])   # Make a copy of the time column as a list of datetime objs
+    date_parts = (uptime.dt.strftime('%Y %m %d %H %M %S %f').str.split(' ', expand=True))   # Create a string with the parts and then split the string based on whitespace
+    date_parts.columns = ['year', 'month', 'day', 'hour', 'min', 'sec', 'ms']
+    date_parts['ms'] = date_parts['ms'].str[:-4]  # Truncate the milliseconds
+    upstream_sep = pd.concat([date_parts, upstream.drop(columns='Time')], axis=1)   # Copy "upstream", drop the time col, and add the parts
 
-        date_string = date_start.strftime('%Y-%m-%d')
-        folder_path = f'./Data/Raw'
-        os.makedirs(folder_path, exist_ok=True)
-        pd.DataFrame(raw).to_csv(f'{folder_path}/{date_string}.csv', index=False)
+    date_string = date_start.strftime('%Y-%m-%d')
+    folder_path = f'./Data/Raw'
+    os.makedirs(folder_path, exist_ok=True)
+    pd.DataFrame(raw).to_csv(f'{folder_path}/{date_string}.csv', index=False)
 
-        folder_path = f'./Data/Upstream/csv'
-        os.makedirs(folder_path, exist_ok=True)
-        upstream.to_csv(f'{folder_path}/{date_string}.csv', index=False)
+    folder_path = f'./Data/Upstream/csv'
+    os.makedirs(folder_path, exist_ok=True)
+    upstream.to_csv(f'{folder_path}/{date_string}.csv', index=False)
 
-        folder_path = f'./Data/Upstream/dat'
-        os.makedirs(folder_path, exist_ok=True)
+    folder_path = f'./Data/Upstream/dat'
+    os.makedirs(folder_path, exist_ok=True)
 
-        with open(f'{folder_path}/{date_string}.dat', "w") as g:
-            g.write('#COOR\nGSM\n\n#START\n')
-        upstream_sep.to_csv(f'{folder_path}/{date_string}.dat', mode="a", index=False, header=False, sep='\t')
+    with open(f'{folder_path}/{date_string}.dat', "w") as g:
+        g.write('#COOR\nGSM\n\n#START\n')
+    upstream_sep.to_csv(f'{folder_path}/{date_string}.dat', mode="a", index=False, header=False, sep='\t')
+
     return date_string
 
 def safe_process(e):
