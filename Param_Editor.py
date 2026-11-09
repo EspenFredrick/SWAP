@@ -33,7 +33,6 @@ for e in range(len(event_list)):
         #The following section reads every line in PARAM.in and saves each line as a list of strings in the variable lines.
     #It then modifies certain lines to the parameter we need
     #And finally write them in
-    print(os.getcwd())
     with open(f"{SWAP_dir}/PARAM_TEMP.in", "r", encoding="utf-8") as file:
         lines = file.readlines()
 
