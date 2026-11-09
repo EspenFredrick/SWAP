@@ -66,7 +66,17 @@ def reconstruct(omni, ace, wind, cols, names=None):
 event_list = pd.read_csv(args.input, delimiter=',', header=0)
 
 def process_event(e):
+    log = []
+
+    def say(msg):  # shadows the global say() inside this function
+        log.append(f'[event {e + 1}] {msg}\n{"~" * 52}')
+
+    def out(msg):  # replaces print() for plain messages
+        log.append(f'[event {e + 1}] {msg}')
+
     say(f'Run {e + 1} out of {len(event_list)}.')
+    out("Importing data...")
+
     start = event_list['Date_Start'][e]
     date_stop = event_list['Date_Stop'][e]
     date_start = pd.to_datetime(start)
@@ -74,7 +84,6 @@ def process_event(e):
     date_string = date_start.strftime('%Y-%m-%d')
     folder_path = f'./Data/Interpolated/{date_string}'
 
-    print("Importing data...")
     # Importing in CSV files generated using GetEvents.py
     omni = pd.read_csv(f'{folder_path}/omni.csv', parse_dates=['Time'])
     artemis = pd.read_csv(f'{folder_path}/artemis.csv', parse_dates=['Time'])
@@ -88,7 +97,7 @@ def process_event(e):
         bound_dist = np.average(omni['BSN'])
 
     # Reconstruct the OMNI magnetic field and plasma from ACE and Wind
-    print('Reconstructing upstream solar wind...')
+    out('Reconstructing upstream solar wind...')
     mfi = reconstruct(omni, ace_mfi, wind_mfi, ['BX', 'BY', 'BZ'], ['bx', 'by', 'bz'])
     swe = reconstruct(omni, ace_swe, wind_swe, ['VX', 'VY', 'VZ', 'Temp', 'NP'])
 
@@ -134,10 +143,10 @@ def process_event(e):
         raw[k] = list(raw[k]) + [hold] * n_pad  # Repeat the held value for every padded point
     raw['time'] = list(raw['time']) + new_t # Append the padded timestamps
 
-    print(f'Upstream now matches OMNI at A:{raw["time"][-1]} / O:{omni["Time"].iloc[-1]}\n'
-          f'Padded {n_pad} pts\n'
-          + ' |'.join(f'{k:>8}' for k in keys) + '\n'
-          + ' |'.join(f'{raw[k][-1]:8.3g}' for k in keys))
+    out(f'Upstream now matches OMNI at A:{raw["time"][-1]} / O:{omni["Time"].iloc[-1]}\n'
+        f'Padded {n_pad} pts\n'
+        + ' |'.join(f'{k:>8}' for k in keys) + '\n'
+        + ' |'.join(f'{raw[k][-1]:8.3g}' for k in keys))
 
     # Create seconds-from-start time array:
     tsec = np.array([(t - raw['time'][0]).total_seconds() for t in raw['time']])
@@ -179,7 +188,7 @@ def process_event(e):
         g.write('#COOR\nGSM\n\n#START\n')
     upstream_sep.to_csv(f'{folder_path}/{date_string}.dat', mode="a", index=False, header=False, sep='\t')
 
-    return date_string
+    return date_string, '\n'.join(log)
 
 def safe_process(e):
     try:
