@@ -1,5 +1,4 @@
 from argparse import ArgumentParser, RawDescriptionHelpFormatter
-from multiprocessing.resource_sharer import stop
 import pandas as pd
 from Functions.GetSatellitesGSM import FMT
 import numpy as np
@@ -11,27 +10,11 @@ from spacepy.pybats import ImfInput
 from matplotlib.lines import Line2D
 from spacepy.plot import applySmartTimeTicks
 from spacepy.datamodel import dmarray
-from dateutil.parser import isoparse
-
-from Functions import functions as f
 from pytplot import get_data
 
 import os
 
 from Functions import GetSatellitesGSM as GS
-import pytz
-from pyspedas import tplot
-
-from numpy import bool_
-from numpy.ma import MaskedArray
-from scipy.interpolate import interp1d
-from matplotlib.dates import date2num
-from spacepy.plot import style
-
-
-
-
-
 
 parser = ArgumentParser(description=__doc__,
                         formatter_class=RawDescriptionHelpFormatter)
@@ -43,10 +26,6 @@ parser.add_argument("--set_downstream", default=True, action='store_true',)
 parser.add_argument("--bs", choices=['dynamic', 'static'], default="dynamic",
                     help='Choose a dynamically-updated or static bow shock nose. Options are dynamic or static')
 args = parser.parse_args()
-
-
-
-
 
 
 # Declare important constants
@@ -64,7 +43,10 @@ def get(name):
     d = get_data(name)
     return d[0], d[1]
 
-
+# Function that prints what is going on in the terminal, so you know that the program isn't hanging
+# It just prints the message you put in (msg) followed by a new line and 52 tildes (~)
+def say(msg):
+    print(f'{msg}\n{"~" * 52}')
 
 
 # Import the OMNI, ACE, and Wind data using the list of times
@@ -91,78 +73,82 @@ for e in range(len(event_list)):
                              'VX': get('Vx')[1], 'VY': get('Vy')[1], 'VZ': get('Vz')[1],
                              'N': get('proton_density')[1], 'T': get('T')[1],
                              'XPOS': get('x')[1], 'BSN': get('BSN_x')[1]}, 'min')
-    print(omni['Time'][0])
+
+    n = len(raw)    # Length of the raw timeseries
     if args.bs == 'dynamic':
-        bound_dist = np.average(omni['BSN'])*RE
+        bound_dist = np.full(n, np.nanmean(omni['BSN']) * RE)  # Create an initial BSN position guess for each point, the average OMNI BSN position over the interval
     else:
-        bound_dist = 32 * RE  # Default distance to BATS-R-US upstream boundary from Earth.
+        bound_dist = np.full(n, 32 * RE) # Create an array full of 32RE distances (SWMF upstream boundary)
+
     max_iterations = 10
-    tolerance = 0.05 * RE  # Stop looping if BSN shifts by less than 0.05 Earth Radii
-    for iteration in range(max_iterations):
-         # 1. Calculate space-craft distance to boundary based on current bound_dist
-        if 'pos' in raw:
-            print('S/C location found! Using dynamic location.')
-            raw['X'] = raw['pos'] - bound_dist
+    tolerance = 0.5 * RE  # Stop looping if BSN shifts by less than 0.5 Earth Radii
+
+    sc_x = raw['pos'].to_numpy() if 'pos' in raw else np.full(n, l1_dist) # Make a numpy array of spacecraft positions if the position is given, otherwise make an array assuming L1 distances
+    ux = np.abs(raw['ux'].to_numpy())  # Create numpy array of velocity in km/s; abs() so GSE-negative Vx doesn't flip the sign
+    t0 = pd.to_datetime(raw['time']).to_numpy() # Create numpy array of timestamps for each point
+    omni_t = pd.to_datetime(omni['Time']).to_numpy() # Create numpy array of OMNI timestamps
+    omni_bsn = omni['BSN'].to_numpy() * RE  # Create numpy array of OMNI BSN locations, in km
+
+    active = np.ones(n, dtype=bool)  # Boolean array containing T/F, where True = not yet converged
+
+    if args.bs == 'dynamic':
+        say("Starting dynamic propagation...")
+        for iteration in range(max_iterations):
+            idx = np.flatnonzero(active)
+            if idx.size == 0:
+                say("Convergence achieved!")
+                break
+
+            # distance to guessed BSN, travel time, arrival time (active points only)
+            X = sc_x[idx] - bound_dist[idx]
+            tshift = X / ux[idx]
+            arrival = t0[idx] + (tshift * 1e9).astype('timedelta64[ns]')
+            arrival = pd.DatetimeIndex(arrival).ceil('min').to_numpy()
+
+            # OMNI BSN at arrival time
+            loc = np.clip(np.searchsorted(omni_t, arrival), 0, len(omni_t) - 1)
+            actual = omni_bsn[loc]
+            actual = np.where(np.isnan(actual), bound_dist[idx], actual)  # missing OMNI -> keep guess
+
+            # compare guess vs actual; update only the ones that missed
+            diff = np.abs(actual - bound_dist[idx])
+            bound_dist[idx] = actual
+            active[idx[diff < tolerance]] = False
+
+            print(f"Iteration {iteration + 1}: {active.sum()} points left, "
+                  f"max change {diff.max() / RE:.3f} RE")
         else:
-            print('S/C location NOT found, using static L1 distance.')
-            raw['X'] = l1_dist - bound_dist
-            
-        # 2. Compute time shift (Ensure raw['ux'] is provided in km/s or converted to match distance units!)
-        raw['tshift'] = raw['X'] / raw['ux']
-        shifted_time = pd.to_datetime(raw['time']) + pd.to_timedelta(raw['tshift'], unit='s')
-        shifted_time_min = shifted_time.dt.ceil('min')
+            print(f"Warning: {active.sum()} points did not converge in {max_iterations} iterations.")
+            say(f"Largest error in convergence was {np.max(np.abs(diff))/RE:.3f} RE")
 
-        print(shifted_time_min)
+    raw['X'] = sc_x - bound_dist
+    raw['tshift'] = raw['X'] / ux
 
-        loc = pd.Index(omni['Time']).get_indexer(shifted_time_min)
-        loc = np.clip(loc, 0, len(omni) - 1)
-        print(loc)
-        if args.bs != 'dynamic':
-            # Static boundary doesn't need to loop/converge
-            break
-                # 5. Extract the dynamic BSN from OMNI at those specific propagation times
-        new_bound_dist = omni['BSN'].iloc[loc].values * RE
-        
-        # 6. Check for convergence: Has the boundary distance stabilized?
-        current_bound_dist = np.atleast_1d(bound_dist)
-        change = np.max(np.abs(new_bound_dist - current_bound_dist))
-        
-        # Update bound_dist array for the next iteration
-        bound_dist = new_bound_dist
-        
-        print(f"Iteration {iteration+1}: Max BSN change balance is {change / RE:.3f} RE")
-        if change < tolerance:
-            print("Convergence achieved!")
-            break
-    else:
-        print("Warning: Reached max iterations without perfect convergence.")
-        
-            # Apply velocity smoothing as required
-   # Create seconds-from-start time array:
-    tsec = np.array([(t - raw['time'][0]).total_seconds() for t in raw['time']])
-
-    # Apply velocity smoothing as required
-    print(f'Applying smoothing using a 1 window size.')
-    velsmooth = medfilt(raw['ux']*RE, 1)
+    # Velocity smoothing (window must be odd; 1 = no smoothing)
+    win = 1
+    print(f'Applying smoothing using a {win} window size.')
+    velsmooth = medfilt(np.abs(raw['ux'].to_numpy()), win)  # km/s, no RE factor
 
     print('Using BALLISTIC propagation.')
-    shift = raw['X']/velsmooth  # Time shift per point.
-    # Apply shift to times.
-    tshift = np.array([t1 - timedelta(seconds=t2) for t1, t2 in
-                       zip(raw['time'], raw['tshift'])])
+    # Final travel time from the converged distance to the BSN (km / km/s = s)
+    shift = raw['X'].to_numpy() / velsmooth
+    raw['tshift'] = shift
 
-    # Ensure that any points that are "overtaken" (i.e., slow wind overcome by
-    # fast wind) are removed. First, locate those points:
+    # Arrival time at the boundary = original time + travel time
+    times = pd.to_datetime(raw['time'])
+    tshift = (times + pd.to_timedelta(shift, unit='s')).to_numpy()
+
+    # Remove "overtaken" points (arrival time must increase monotonically)
     keep = [0]
     discard = []
     lasttime = tshift[0]
-    for i in range(1, len(raw['time'])):
+    for i in range(1, len(tshift)):
         if tshift[i] > lasttime:
             keep.append(i)
             lasttime = tshift[i]
         else:
             discard.append(i)
-    print(f'Removing "overtaken" points {len(discard)} of {tsec.size} total.')
+    print(f'Removing "overtaken" points {len(discard)} of {len(tshift)} total.')
 
 
     #Puts all the raw data into Upstream Dataframe
@@ -186,7 +172,8 @@ for e in range(len(event_list)):
     imfout = ImfInput(path, load=False, npoints=len(keep))
     for v in swmf_vars:
         imfout[v] = dmarray(raw[v][keep], {'units': units[v]})
-    imfout['time'] = tshift[keep]
+    imfout['time'] = pd.to_datetime(tshift[keep]).to_pydatetime()  # if ImfInput expects datetime objects
+    imfout.attrs['satxyz'] = [np.mean(bound_dist) / RE, 0, 0]
 
     downstream = pd.DataFrame({
         'Time': imfout['time'],
