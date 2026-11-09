@@ -1,0 +1,95 @@
+Stand-alone BATS-R-US, 1D ideal MHD solar-wind propagation L1 -> ARTEMIS
+Compile first with:  ./Config.pl -install -compiler=gfortran
+                     ./Config.pl -e=Mhd -u=Default -g=8,1,1 -ng=2
+                     make -j BATSRUS ; make rundir ; cp this file to run/PARAM.in
+
+#ECHO
+T                       DoEcho
+
+#DESCRIPTION
+1D MHD propagation of reconstructed L1 data      StringDescription
+
+#STARTTIME              (set ~2 h BEFORE your analysis window; spin-up)
+2015                    iYear
+1                       iMonth
+7                       iDay
+0                       iHour
+0                       iMinute
+0                       iSecond
+
+#TIMEACCURATE
+T                       IsTimeAccurate
+
+#COORDSYSTEM
+GSM                     TypeCoordSystem
+
+#BODY
+F                       UseBody     (no Earth inner boundary)
+
+#DIPOLE
+0.0                     DipoleStrengthSi [T]   (no magnetosphere)
+
+#PLASMA
+1.0                     FluidMass [amu]  (1.0 = pure H+; ~1.1-1.2 to fold in alphas)
+1.0                     IonCharge [e]
+1.0                     ElectronTemperatureRatio  Te/Tp (default 0 = cold electrons)
+
+#GRID                   x: 1024 cells of 0.25 RE (8 cells/block x 128 blocks)
+128                     nRootBlock1
+1                       nRootBlock2
+1                       nRootBlock3
+-16.0                   xMin  [RE]
+240.0                   xMax  [RE]  = x of the plane your input data represent
+-1.0                    yMin  (dummy in 1D)
+ 1.0                    yMax
+-1.0                    zMin
+ 1.0                    zMax
+
+#GRIDBLOCKALL
+200                     MaxBlock
+
+#OUTERBOUNDARY
+outflow                 TypeBc1  xMin (downstream)
+vary                    TypeBc2  xMax (time-dependent, from #SOLARWINDFILE)
+
+#SOLARWINDFILE
+T                       UseSolarWindFile
+IMF.dat                 NameSolarWindFile
+
+#SCHEME
+2                       nOrder
+HLLD                    TypeFlux   (least diffusive ideal-MHD flux; Rusanov = most robust)
+mc3                     TypeLimiter
+1.2                     LimiterBeta
+
+#TIMESTEPPING
+2                       nStage
+0.8                     CflExpl
+
+#SATELLITE
+1                       nSatellite
+VAR date                StringSatellite
+-1                      DnOutput
+60.0                    DtOutput [s]
+artemis_p1.dat          NameTrajectoryFile   (GSM, RE; set y=z=0 in 1D)
+n ux uy uz bx by bz t p
+
+#SAVELOGFILE
+T                       DoSaveLogfile
+VAR step date           StringLog
+100                     DnSaveLogfile
+-1.                     DtSaveLogfile
+dt rho p
+
+#SAVEPLOT
+1                       nPlotFile
+1d MHD idl              StringPlot   (full x-profile every 10 min; check '1d' cut name in PARAM.XML)
+-1                      DnSavePlot
+600.0                   DtSavePlot
+0.0                     DxSavePlot
+
+#STOP
+-1                      MaxIteration
+1 d                     tSimulationMax   (event length + spin-up)
+
+#END
