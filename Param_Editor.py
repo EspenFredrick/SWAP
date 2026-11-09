@@ -42,7 +42,7 @@ def create_rundir(date_start):
     lines[56] = f"{date_string}.dat                 NameSolarWindFile"
     lines[73] = f"{date_string}_sat.dat          NameTrajectoryFile   (GSM, RE; set y=z=0 in 1D)"
 
-    with open(f"{SWAP_dir}/PARAM.in", "w", encoding="utf-8") as file:
+    with open(f"{SWAP_dir}/PARAM_{date_string}.in", "w", encoding="utf-8") as file:
         file.writelines(lines)
 
     rundir_path = f"{BATS_dir}/run_{date_string}"
@@ -52,7 +52,7 @@ def create_rundir(date_start):
     command = f"make rundir RUNDIR={rundir_path}"
     subprocess.run(command, shell=True, cwd=BATS_dir, check=True)
 
-    shutil.move(f"{SWAP_dir}/PARAM.in", f"{BATS_dir}/run_{date_string}/PARAM.in")
+    shutil.move(f"{SWAP_dir}/PARAM_{date_string}.in", f"{BATS_dir}/run_{date_string}/PARAM.in")
     shutil.copy(f"{SWAP_dir}/Data/Upstream/dat/{date_string}.dat", f"{BATS_dir}/run_{date_string}/{date_string}.dat")
     # shutil.copy(f"../SWAP/Data")
     #say("Done.")
