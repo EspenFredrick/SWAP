@@ -191,7 +191,7 @@ for e in range(len(event_list)):
     downstream = downstream.resample('min').mean().interpolate(method='linear').ffill().bfill()
     downstream = downstream.reset_index()
 
-    folder_path = f'./Data/Downstream'
+    folder_path = f'./Data/Downstream/Ballistic'
     os.makedirs(folder_path, exist_ok=True)
     downstream.to_csv(f'{folder_path}/{date_string}.csv', index=False)
 
