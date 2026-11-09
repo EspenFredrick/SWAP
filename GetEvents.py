@@ -1,4 +1,7 @@
 # Place all downloaded pySPEDAS data in the /Data/Raw/ folder
+import warnings
+warnings.filterwarnings('ignore')
+
 import os
 os.environ['SPEDAS_DATA_DIR'] = 'Data/Raw'
 
@@ -8,6 +11,7 @@ import numpy as np
 import pandas as pd
 import pyspedas
 from pytplot import get_data
+from multiprocessing import Pool
 
 from Functions import GetSatellitesGSM as GS
 
@@ -38,11 +42,13 @@ def get(name):
 def say(msg):
     print(f'{msg}\n{"~" * 52}')
 
-# Loop that downloads the data from the input list of times
-for i, ev in pd.read_csv(args.input).iterrows():
+events = pd.read_csv(args.input)   # module level, so workers see it
+
+def download_event(i):
+    ev = events.iloc[i]
     start, stop = pd.to_datetime(ev['Date_Start']), pd.to_datetime(ev['Date_Stop'])
     l1 = [(start - L1_LEAD).strftime(FMT), stop.strftime(FMT)]
-    say(f'Event {i + 1}: {start} to {stop}')
+    print(f'Event {i + 1}: {start} to {stop}')
 
     # OMNI (already propagated to the bow shock nose)
     say('Downloading OMNI')
@@ -92,3 +98,16 @@ for i, ev in pd.read_csv(args.input).iterrows():
     for name, df in dict(omni=omni, artemis=artemis, ace_mfi=ace_mfi, ace_swe=ace_swe,
                          wind_mfi=wind_mfi, wind_swe=wind_swe).items():
         df.to_csv(f'{folder}/{name}.csv')  # Time index is written as a column
+
+    print(f'Finished event {i + 1}', flush=True)
+
+
+def safe_download(i):
+    try:
+        download_event(i)
+    except Exception as ex:
+        print(f'FAILED event {i + 1}: {ex!r}', flush=True)
+
+if __name__ == '__main__':
+    with Pool(processes=min(6, len(events)), maxtasksperchild=1) as pool:
+        pool.map(safe_download, range(len(events)))
