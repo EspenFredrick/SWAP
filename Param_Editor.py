@@ -28,7 +28,7 @@ args = parser.parse_args()
 # Function that we will multiprocess
 def create_rundir(date_start):
     date_string = date_start.strftime('%Y-%m-%d')
-    #say(f"Creating PARAM.in for {date_string}")
+    say(f"Creating PARAM.in for {date_string}")
 
     with open(f"{SWAP_dir}/PARAM_TEMP.in", "r", encoding="utf-8") as file:
         lines = file.readlines()
@@ -46,7 +46,7 @@ def create_rundir(date_start):
         file.writelines(lines)
 
     rundir_path = f"{BATS_dir}/run_{date_string}"
-    #print(f"Moving PARAM.in to {rundir_path}")
+    print(f"Moving PARAM.in to {rundir_path}")
     if os.path.exists(rundir_path):
         shutil.rmtree(rundir_path)
     command = f"make rundir RUNDIR={rundir_path}"
@@ -55,7 +55,7 @@ def create_rundir(date_start):
     shutil.move(f"{SWAP_dir}/PARAM_{date_string}.in", f"{BATS_dir}/run_{date_string}/PARAM.in")
     shutil.copy(f"{SWAP_dir}/Data/Upstream/dat/{date_string}.dat", f"{BATS_dir}/run_{date_string}/{date_string}.dat")
     # shutil.copy(f"../SWAP/Data")
-    #say("Done.")
+    say("Done.")
 
 if __name__ == "__main__":
     # Get list of events as a dataframe and then export all the datetimes from the first column to date_objs
