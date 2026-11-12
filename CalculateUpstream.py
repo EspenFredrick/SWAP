@@ -155,10 +155,6 @@ def process_event(e):
         hold = np.nanmedian(np.asarray(raw[k][-10:], dtype=float))   # Creates the pad values using the median of the last 10 values
         raw[k] = list(raw[k]) + [hold] * n_pad  # Repeat the held value for every padded point
     raw['time'] = list(raw['time']) + new_t # Append the padded timestamps
-    if n_pad < 0:
-        notes.append(f'upstream data extends {-n_pad} min past the end of OMNI (nothing padded)')
-    elif n_pad > 60:
-        notes.append(f'padded {n_pad} min at the end of the interval (data ends well before OMNI)')
 
     # Create seconds-from-start time array:
     tsec = np.array([(t - raw['time'][0]).total_seconds() for t in raw['time']])

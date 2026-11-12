@@ -154,9 +154,6 @@ def process_event(e):
                   #f"max change {diff.max() / RE:.3f} RE")
         else:
             print(f"Warning for event {e+1}: {active.sum()} points did not converge in {max_iterations} iterations.")
-            if active.sum() > 0:
-                notes.append(f'{active.sum()} of {n} points did not converge in {max_iterations} iterations '
-                             f'(last max BSN change {diff.max() / RE:.2f} RE)')
             #say(f"Largest error in convergence was {np.max(np.abs(diff))/RE:.3f} RE")
 
     raw['X'] = sc_x - bound_dist
@@ -187,8 +184,6 @@ def process_event(e):
         else:
             discard.append(i)
     print(f'Removing "overtaken" points {len(discard)} of {len(tshift)} total for event {e+1}.')
-    if len(discard) > 0.05 * len(tshift):
-        notes.append(f'{len(discard)} of {len(tshift)} points ({len(discard) / len(tshift):.0%}) removed as overtaken')
 
 
     #Puts all the raw data into Upstream Dataframe
