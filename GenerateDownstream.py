@@ -70,6 +70,11 @@ def process_event(e):
     date_string = date_start.strftime('%Y-%m-%d')
     folder_path = f'./Data/Raw'
     date_string = date_start.strftime('%Y-%m-%d')
+
+    if not os.path.exists(f'./Data/Raw/{date_string}.csv'):
+        print(f'Skipping event {e + 1}: no upstream file for {date_string}. Run the upstream script first.', flush=True)
+        return
+
     raw = pd.read_csv(f'{folder_path}/{date_string}.csv',parse_dates=['time'])
 
     # Get S/C distance. If not in file, use approximation.
@@ -255,9 +260,14 @@ def prefetch(e):
                                         stop.strftime(FMT)],
                                 datatype='1min', level='hro2', time_clip=True)
 
+def safe_process(e):
+    try:
+        process_event(e)
+    except Exception as ex:
+        print(f'FAILED event {e + 1}: {ex!r}', flush=True)
 
 if __name__ == '__main__':
-    for e in range(len(event_list)):      # serial download pass, avoids file races
+    for e in range(len(event_list)):
         prefetch(e)
     with Pool(processes=min(32, len(event_list)), maxtasksperchild=1) as pool:
-        pool.map(process_event, range(len(event_list)))
+        pool.map(safe_process, range(len(event_list)))
