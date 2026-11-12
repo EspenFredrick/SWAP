@@ -33,6 +33,8 @@ parser.add_argument("input", type=str, help='The list of dates to analyze in the
 parser.add_argument("--set_downstream", default=True, action='store_true',)
 parser.add_argument("--bs", choices=['dynamic', 'static'], default="dynamic",
                     help='Choose a dynamically-updated or static bow shock nose. Options are dynamic or static')
+parser.add_argument('--force', action='store_true',
+                    help='Reprocess events even if their output already exists.')
 args = parser.parse_args()
 
 
@@ -70,6 +72,12 @@ def process_event(e):
     date_string = date_start.strftime('%Y-%m-%d')
     folder_path = f'./Data/Raw'
     date_string = date_start.strftime('%Y-%m-%d')
+
+    outputs = [f'./Data/Downstream/Ballistic/{date_string}.csv',
+               f'./Plots/OutputProp/{date_string}outputprop.png']
+    if not args.force and all(os.path.exists(p) for p in outputs):
+        print(f'Skipping event {e + 1}: already processed', flush=True)
+        return
 
     if not os.path.exists(f'./Data/Raw/{date_string}.csv'):
         print(f'Skipping event {e + 1}: no upstream file for {date_string}. Run the upstream script first.', flush=True)
@@ -253,6 +261,7 @@ def process_event(e):
 
 
 def prefetch(e):
+
     print(f'Prefetching event {e + 1} of {len(event_list)}', flush=True)
     start = pd.to_datetime(event_list['Date_Start'][e])
     stop = pd.to_datetime(event_list['Date_Stop'][e])
@@ -268,6 +277,8 @@ def safe_process(e):
 
 if __name__ == '__main__':
     for e in range(len(event_list)):
-        prefetch(e)
+        d = pd.to_datetime(event_list['Date_Start'][e]).strftime('%Y-%m-%d')
+        if args.force or not os.path.exists(f'./Plots/OutputProp/{d}outputprop.png'):
+            prefetch(e)
     with Pool(processes=min(32, len(event_list)), maxtasksperchild=1) as pool:
         pool.map(safe_process, range(len(event_list)))
