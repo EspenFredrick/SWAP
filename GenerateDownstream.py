@@ -17,6 +17,7 @@ from spacepy.plot import applySmartTimeTicks
 from spacepy.datamodel import dmarray
 from pytplot import get_data
 import os
+import traceback
 
 import matplotlib
 matplotlib.use('Agg')
@@ -62,6 +63,11 @@ def say(msg):
 # Import the OMNI, ACE, and Wind data using the list of times
 event_list = pd.read_csv(args.input, delimiter=',', header=0)
 
+# Returns the yyyy-mm-dd string for an event, used to label errors
+def event_date(e):
+    return pd.to_datetime(event_list['Date_Start'][e]).strftime('%Y-%m-%d')
+
+# Processes one event. Returns (status, date, message), where status is 'ok', 'skipped' or 'error'
 def process_event(e):
     print(f'Running event {e + 1} of {len(event_list)}', flush=True)
     start = event_list['Date_Start'][e]
@@ -77,13 +83,20 @@ def process_event(e):
                f'./Plots/OutputProp/{date_string}outputprop.png']
     if not args.force and all(os.path.exists(p) for p in outputs):
         print(f'Skipping event {e + 1}: already processed', flush=True)
-        return
+        return ('skipped', date_string, 'already processed')
 
     if not os.path.exists(f'./Data/Raw/{date_string}.csv'):
         print(f'Skipping event {e + 1}: no upstream file for {date_string}. Run the upstream script first.', flush=True)
-        return
+        return ('error', date_string, 'no upstream file in Data/Raw (run the upstream script first)')
 
     raw = pd.read_csv(f'{folder_path}/{date_string}.csv',parse_dates=['time'])
+
+    # Things that went wrong but did not stop the event; reported in the end-of-run summary
+    notes = []
+    raw_nan = {k: raw[k].isna().mean() for k in swmf_vars if k in raw}
+    raw_nan = {k: v for k, v in raw_nan.items() if v > 0}
+    if raw_nan:
+        notes.append('NaNs in upstream file: ' + ', '.join(f'{k} {v:.1%}' for k, v in raw_nan.items()))
 
     # Get S/C distance. If not in file, use approximation.
     #print(f'Run {e+1} out of {len(event_list)}.')
@@ -141,6 +154,9 @@ def process_event(e):
                   #f"max change {diff.max() / RE:.3f} RE")
         else:
             print(f"Warning for event {e+1}: {active.sum()} points did not converge in {max_iterations} iterations.")
+            if active.sum() > 0:
+                notes.append(f'{active.sum()} of {n} points did not converge in {max_iterations} iterations '
+                             f'(last max BSN change {diff.max() / RE:.2f} RE)')
             #say(f"Largest error in convergence was {np.max(np.abs(diff))/RE:.3f} RE")
 
     raw['X'] = sc_x - bound_dist
@@ -171,6 +187,8 @@ def process_event(e):
         else:
             discard.append(i)
     print(f'Removing "overtaken" points {len(discard)} of {len(tshift)} total for event {e+1}.')
+    if len(discard) > 0.05 * len(tshift):
+        notes.append(f'{len(discard)} of {len(tshift)} points ({len(discard) / len(tshift):.0%}) removed as overtaken')
 
 
     #Puts all the raw data into Upstream Dataframe
@@ -258,6 +276,7 @@ def process_event(e):
     fig.savefig(path, dpi=300)
 
     print(f'Finished processing event {e + 1}', flush=True)
+    return ('ok', date_string, '; '.join(notes))
 
 
 def prefetch(e):
@@ -269,11 +288,38 @@ def prefetch(e):
                                         stop.strftime(FMT)],
                                 datatype='1min', level='hro2', time_clip=True)
 
+# Wraps process_event so one bad event doesn't kill the whole batch
 def safe_process(e):
     try:
-        process_event(e)
+        return process_event(e)
     except Exception as ex:
-        print(f'FAILED event {e + 1}: {ex!r}', flush=True)
+        tb = traceback.extract_tb(ex.__traceback__)[-1]
+        where = f'{os.path.basename(tb.filename)}:{tb.lineno} in {tb.name}'
+        print(f'FAILED event {e + 1}', flush=True)
+        return ('error', event_date(e), f'{type(ex).__name__}: {ex} [{where}]')
+
+# Prints (and saves) the summary block at the end of the run
+# 'ok' results with a message are files that were written but had something worth noting
+def summarize(results, name):
+    ok = [r for r in results if r[0] == 'ok']
+    warn = sorted((r for r in ok if r[2]), key=lambda r: r[1])
+    skp = [r for r in results if r[0] == 'skipped']
+    err = sorted((r for r in results if r[0] == 'error'), key=lambda r: r[1])
+    bar = '~' * 52
+    lines = [bar,
+             f'Wrote {len(ok)} files of {len(results)} in the event list.',
+             f'{len(err)} errors, {len(ok)} successful ({len(warn)} with warnings), {len(skp)} skipped (already done)']
+    if err:
+        lines.append('errors (no file written):')
+        lines += [f'{d}: {m}' for _, d, m in err]
+    if warn:
+        lines.append('warnings (file written anyway):')
+        lines += [f'{d}: {m}' for _, d, m in warn]
+    lines.append(bar)
+    text = '\n'.join(lines)
+    print('\n' + text)
+    with open(f'{name}_log.txt', 'w') as fh:
+        fh.write(text + '\n')
 
 if __name__ == '__main__':
     for e in range(len(event_list)):
@@ -281,4 +327,5 @@ if __name__ == '__main__':
         if args.force or not os.path.exists(f'./Plots/OutputProp/{d}outputprop.png'):
             prefetch(e)
     with Pool(processes=min(32, len(event_list)), maxtasksperchild=1) as pool:
-        pool.map(safe_process, range(len(event_list)))
+        results = pool.map(safe_process, range(len(event_list)), chunksize=1)
+    summarize(results, 'GenerateDownstream')

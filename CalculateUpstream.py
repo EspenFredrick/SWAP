@@ -2,6 +2,7 @@ import warnings
 warnings.filterwarnings('ignore')
 
 import os
+import traceback
 from argparse import ArgumentParser, RawDescriptionHelpFormatter
 from datetime import timedelta
 
@@ -68,6 +69,13 @@ def reconstruct(omni, ace, wind, cols, names=None):
 # Setting up the event list using arguments
 event_list = pd.read_csv(args.input, delimiter=',', header=0)
 
+INPUT_FILES = ['omni', 'artemis', 'ace_mfi', 'ace_swe', 'wind_mfi', 'wind_swe']
+
+# Returns the yyyy-mm-dd string for an event, used to label errors
+def event_date(e):
+    return pd.to_datetime(event_list['Date_Start'][e]).strftime('%Y-%m-%d')
+
+# Processes one event. Returns (status, date, message), where status is 'ok' or 'error'
 def process_event(e):
     print(f'Running event {e + 1} of {len(event_list)}', flush=True)
     start = event_list['Date_Start'][e]
@@ -77,7 +85,11 @@ def process_event(e):
     date_string = date_start.strftime('%Y-%m-%d')
     folder_path = f'./Data/Interpolated/{date_string}'
 
-    #print("Importing data...")
+    # Check that every input file from the download script exists
+    missing = [n for n in INPUT_FILES if not os.path.exists(f'{folder_path}/{n}.csv')]
+    if missing:
+        return ('error', date_string, f'missing input files: {", ".join(missing)}')
+
     # Importing in CSV files generated using GetEvents.py
     omni = pd.read_csv(f'{folder_path}/omni.csv', parse_dates=['Time'])
     artemis = pd.read_csv(f'{folder_path}/artemis.csv', parse_dates=['Time'])
@@ -91,7 +103,6 @@ def process_event(e):
         bound_dist = np.average(omni['BSN'])
 
     # Reconstruct the OMNI magnetic field and plasma from ACE and Wind
-    #print('Reconstructing upstream solar wind...')
     mfi = reconstruct(omni, ace_mfi, wind_mfi, ['BX', 'BY', 'BZ'], ['bx', 'by', 'bz'])
     swe = reconstruct(omni, ace_swe, wind_swe, ['VX', 'VY', 'VZ', 'Temp', 'NP'])
 
@@ -125,6 +136,14 @@ def process_event(e):
     keys = ['bx', 'by', 'bz', 'ux', 'uy', 'uz', 'n', 't']
     secs = (pd.to_datetime(raw['time']) - pd.Timestamp(0)).total_seconds()  # Convert datetimes to Unix seconds, which regrid expects
     df = GS.regrid(secs, {k: np.asarray(raw[k], dtype=float) for k in keys}, 'min', bad=-1e30)  # Resample onto a regular 1-minute grid, interpolate gaps, and mask leftover fill values
+
+    # Note (but do not stop for) NaNs left in the regridded data
+    notes = []
+    nan_by_key = {k: np.isnan(df[k].to_numpy(dtype=float)).mean() for k in keys}
+    nan_by_key = {k: v for k, v in nan_by_key.items() if v > 0}
+    if nan_by_key:
+        notes.append('NaNs after regrid: ' + ', '.join(f'{k} {v:.1%}' for k, v in nan_by_key.items()))
+
     raw = {'time': list(df.index.to_pydatetime()), **{k: df[k].to_numpy() for k in keys}}   # Rebuild raw with the regular 1-minute times and the regridded values
 
     # Pad end of input so the last real data reaches the satellite
@@ -136,16 +155,14 @@ def process_event(e):
         hold = np.nanmedian(np.asarray(raw[k][-10:], dtype=float))   # Creates the pad values using the median of the last 10 values
         raw[k] = list(raw[k]) + [hold] * n_pad  # Repeat the held value for every padded point
     raw['time'] = list(raw['time']) + new_t # Append the padded timestamps
-
-    #print(f'Upstream now matches OMNI at A:{raw["time"][-1]} / O:{omni["Time"].iloc[-1]}\n'
-          #f'Padded {n_pad} pts\n'
-          #+ ' |'.join(f'{k:>8}' for k in keys) + '\n'
-          #+ ' |'.join(f'{raw[k][-1]:8.3g}' for k in keys))
+    if n_pad < 0:
+        notes.append(f'upstream data extends {-n_pad} min past the end of OMNI (nothing padded)')
+    elif n_pad > 60:
+        notes.append(f'padded {n_pad} min at the end of the interval (data ends well before OMNI)')
 
     # Create seconds-from-start time array:
     tsec = np.array([(t - raw['time'][0]).total_seconds() for t in raw['time']])
 
-    #say('Saving upstream solar wind...')
     # Puts all the raw data into Upstream Dataframe
     upstream = pd.DataFrame({
         'Time': raw['time'],
@@ -166,7 +183,6 @@ def process_event(e):
     date_parts['ms'] = date_parts['ms'].str[:-4]  # Truncate the milliseconds
     upstream_sep = pd.concat([date_parts, upstream.drop(columns='Time')], axis=1)   # Copy "upstream", drop the time col, and add the parts
 
-    date_string = date_start.strftime('%Y-%m-%d')
     folder_path = f'./Data/Raw'
     os.makedirs(folder_path, exist_ok=True)
     pd.DataFrame(raw).to_csv(f'{folder_path}/{date_string}.csv', index=False)
@@ -183,14 +199,41 @@ def process_event(e):
     upstream_sep.to_csv(f'{folder_path}/{date_string}.dat', mode="a", index=False, header=False, sep='\t')
 
     print(f'Finished processing event {e + 1}, padded {n_pad} values (of {len(upstream)} total)', flush=True)
-    return date_string
+    return ('ok', date_string, '; '.join(notes))
 
+# Wraps process_event so one bad event doesn't kill the whole batch
 def safe_process(e):
     try:
         return process_event(e)
     except Exception as ex:
-        print(f'FAILED event {e + 1}: {ex!r}', flush=True)     # one bad event doesn't kill the whole batch
+        tb = traceback.extract_tb(ex.__traceback__)[-1]
+        where = f'{os.path.basename(tb.filename)}:{tb.lineno} in {tb.name}'
+        print(f'FAILED event {e + 1}', flush=True)
+        return ('error', event_date(e), f'{type(ex).__name__}: {ex} [{where}]')
+
+# Prints (and saves) the summary block at the end of the run
+# 'ok' results with a message are files that were written but had something worth noting
+def summarize(results, name):
+    ok = [r for r in results if r[0] == 'ok']
+    warn = sorted((r for r in ok if r[2]), key=lambda r: r[1])
+    err = sorted((r for r in results if r[0] == 'error'), key=lambda r: r[1])
+    bar = '~' * 52
+    lines = [bar,
+             f'Wrote {len(ok)} files of {len(results)} in the event list.',
+             f'{len(err)} errors, {len(ok)} successful ({len(warn)} with warnings)']
+    if err:
+        lines.append('errors (no file written):')
+        lines += [f'{d}: {m}' for _, d, m in err]
+    if warn:
+        lines.append('warnings (file written anyway):')
+        lines += [f'{d}: {m}' for _, d, m in warn]
+    lines.append(bar)
+    text = '\n'.join(lines)
+    print('\n' + text)
+    with open(f'{name}_log.txt', 'w') as fh:
+        fh.write(text + '\n')
 
 if __name__ == '__main__':
     with Pool(processes=min(32, len(event_list)), maxtasksperchild=1) as pool:
-        pool.map(safe_process, range(len(event_list)))
+        results = pool.map(safe_process, range(len(event_list)), chunksize=1)
+    summarize(results, 'CalculateUpstream')
