@@ -1,3 +1,6 @@
+import warnings
+warnings.filterwarnings('ignore')
+
 import os
 from argparse import ArgumentParser, RawDescriptionHelpFormatter
 from datetime import timedelta
@@ -8,6 +11,8 @@ from dateutil.parser import isoparse
 
 from Functions import functions as f
 from Functions import GetSatellitesGSM as GS
+
+from multiprocessing import Pool
 
 # Command line arguments
 parser = ArgumentParser(description=__doc__,
@@ -62,8 +67,9 @@ def reconstruct(omni, ace, wind, cols, names=None):
 
 # Setting up the event list using arguments
 event_list = pd.read_csv(args.input, delimiter=',', header=0)
-for e in range(len(event_list)):
-    say(f'Run {e + 1} out of {len(event_list)}.')
+
+def process_event(e):
+    print(f'Running event {e + 1} of {len(event_list)}', flush=True)
     start = event_list['Date_Start'][e]
     date_stop = event_list['Date_Stop'][e]
     date_start = pd.to_datetime(start)
@@ -71,7 +77,7 @@ for e in range(len(event_list)):
     date_string = date_start.strftime('%Y-%m-%d')
     folder_path = f'./Data/Interpolated/{date_string}'
 
-    print("Importing data...")
+    #print("Importing data...")
     # Importing in CSV files generated using GetEvents.py
     omni = pd.read_csv(f'{folder_path}/omni.csv', parse_dates=['Time'])
     artemis = pd.read_csv(f'{folder_path}/artemis.csv', parse_dates=['Time'])
@@ -85,7 +91,7 @@ for e in range(len(event_list)):
         bound_dist = np.average(omni['BSN'])
 
     # Reconstruct the OMNI magnetic field and plasma from ACE and Wind
-    print('Reconstructing upstream solar wind...')
+    #print('Reconstructing upstream solar wind...')
     mfi = reconstruct(omni, ace_mfi, wind_mfi, ['BX', 'BY', 'BZ'], ['bx', 'by', 'bz'])
     swe = reconstruct(omni, ace_swe, wind_swe, ['VX', 'VY', 'VZ', 'Temp', 'NP'])
 
@@ -131,15 +137,15 @@ for e in range(len(event_list)):
         raw[k] = list(raw[k]) + [hold] * n_pad  # Repeat the held value for every padded point
     raw['time'] = list(raw['time']) + new_t # Append the padded timestamps
 
-    print(f'Upstream now matches OMNI at A:{raw["time"][-1]} / O:{omni["Time"].iloc[-1]}\n'
-          f'Padded {n_pad} pts\n'
-          + ' |'.join(f'{k:>8}' for k in keys) + '\n'
-          + ' |'.join(f'{raw[k][-1]:8.3g}' for k in keys))
+    #print(f'Upstream now matches OMNI at A:{raw["time"][-1]} / O:{omni["Time"].iloc[-1]}\n'
+          #f'Padded {n_pad} pts\n'
+          #+ ' |'.join(f'{k:>8}' for k in keys) + '\n'
+          #+ ' |'.join(f'{raw[k][-1]:8.3g}' for k in keys))
 
     # Create seconds-from-start time array:
     tsec = np.array([(t - raw['time'][0]).total_seconds() for t in raw['time']])
 
-    say('Saving upstream solar wind...')
+    #say('Saving upstream solar wind...')
     # Puts all the raw data into Upstream Dataframe
     upstream = pd.DataFrame({
         'Time': raw['time'],
@@ -175,3 +181,16 @@ for e in range(len(event_list)):
     with open(f'{folder_path}/{date_string}.dat', "w") as g:
         g.write('#COOR\nGSM\n\n#START\n')
     upstream_sep.to_csv(f'{folder_path}/{date_string}.dat', mode="a", index=False, header=False, sep='\t')
+
+    print(f'Finished processing event {e + 1}, padded {n_pad} values (of {len(upstream)} total)', flush=True)
+    return date_string
+
+def safe_process(e):
+    try:
+        return process_event(e)
+    except Exception as ex:
+        print(f'FAILED event {e + 1}: {ex!r}', flush=True)     # one bad event doesn't kill the whole batch
+
+if __name__ == '__main__':
+    with Pool(processes=min(32, len(event_list)), maxtasksperchild=1) as pool:
+        pool.map(safe_process, range(len(event_list)))

@@ -1,5 +1,10 @@
+import warnings
+warnings.filterwarnings('ignore')
+warnings.filterwarnings('ignore', category=FutureWarning)
+
 from argparse import ArgumentParser, RawDescriptionHelpFormatter
 import pandas as pd
+pd.set_option('future.no_silent_downcasting', True)
 from Functions.GetSatellitesGSM import FMT
 import numpy as np
 import pyspedas
@@ -11,8 +16,11 @@ from matplotlib.lines import Line2D
 from spacepy.plot import applySmartTimeTicks
 from spacepy.datamodel import dmarray
 from pytplot import get_data
-
 import os
+
+import matplotlib
+matplotlib.use('Agg')
+from multiprocessing import Pool
 
 from Functions import GetSatellitesGSM as GS
 
@@ -25,6 +33,8 @@ parser.add_argument("input", type=str, help='The list of dates to analyze in the
 parser.add_argument("--set_downstream", default=True, action='store_true',)
 parser.add_argument("--bs", choices=['dynamic', 'static'], default="dynamic",
                     help='Choose a dynamically-updated or static bow shock nose. Options are dynamic or static')
+parser.add_argument('--force', action='store_true',
+                    help='Reprocess events even if their output already exists.')
 args = parser.parse_args()
 
 
@@ -51,8 +61,9 @@ def say(msg):
 
 # Import the OMNI, ACE, and Wind data using the list of times
 event_list = pd.read_csv(args.input, delimiter=',', header=0)
-for e in range(len(event_list)):
 
+def process_event(e):
+    print(f'Running event {e + 1} of {len(event_list)}', flush=True)
     start = event_list['Date_Start'][e]
     date_stop = event_list['Date_Stop'][e]
     date_stop = pd.to_datetime(date_stop)
@@ -61,10 +72,21 @@ for e in range(len(event_list)):
     date_string = date_start.strftime('%Y-%m-%d')
     folder_path = f'./Data/Raw'
     date_string = date_start.strftime('%Y-%m-%d')
+
+    outputs = [f'./Data/Downstream/Ballistic/{date_string}.csv',
+               f'./Plots/OutputProp/{date_string}outputprop.png']
+    if not args.force and all(os.path.exists(p) for p in outputs):
+        print(f'Skipping event {e + 1}: already processed', flush=True)
+        return
+
+    if not os.path.exists(f'./Data/Raw/{date_string}.csv'):
+        print(f'Skipping event {e + 1}: no upstream file for {date_string}. Run the upstream script first.', flush=True)
+        return
+
     raw = pd.read_csv(f'{folder_path}/{date_string}.csv',parse_dates=['time'])
 
     # Get S/C distance. If not in file, use approximation.
-    print(f'Run {e+1} out of {len(event_list)}.')
+    #print(f'Run {e+1} out of {len(event_list)}.')
     pyspedas.projects.omni.data(trange=[(date_start - timedelta(minutes=180)).strftime(FMT), date_stop.strftime(FMT)],
                                     datatype='1min', level='hro2', time_clip=True)
     t = get('BZ_GSM')[0]
@@ -92,11 +114,11 @@ for e in range(len(event_list)):
     active = np.ones(n, dtype=bool)  # Boolean array containing T/F, where True = not yet converged
 
     if args.bs == 'dynamic':
-        say("Starting dynamic propagation...")
+        print(f"Starting dynamic propagation for event {e+1}...")
         for iteration in range(max_iterations):
             idx = np.flatnonzero(active)
             if idx.size == 0:
-                say("Convergence achieved!")
+                print(f"Convergence achieved for event {e+1}!")
                 break
 
             # distance to guessed BSN, travel time, arrival time (active points only)
@@ -115,21 +137,21 @@ for e in range(len(event_list)):
             bound_dist[idx] = actual
             active[idx[diff < tolerance]] = False
 
-            print(f"Iteration {iteration + 1}: {active.sum()} points left, "
-                  f"max change {diff.max() / RE:.3f} RE")
+            #print(f"Iteration {iteration + 1}: {active.sum()} points left, "
+                  #f"max change {diff.max() / RE:.3f} RE")
         else:
-            print(f"Warning: {active.sum()} points did not converge in {max_iterations} iterations.")
-            say(f"Largest error in convergence was {np.max(np.abs(diff))/RE:.3f} RE")
+            print(f"Warning for event {e+1}: {active.sum()} points did not converge in {max_iterations} iterations.")
+            #say(f"Largest error in convergence was {np.max(np.abs(diff))/RE:.3f} RE")
 
     raw['X'] = sc_x - bound_dist
     raw['tshift'] = raw['X'] / ux
 
     # Velocity smoothing (window must be odd; 1 = no smoothing)
     win = 1
-    print(f'Applying smoothing using a {win} window size.')
+    #print(f'Applying smoothing using a {win} window size.')
     velsmooth = medfilt(np.abs(raw['ux'].to_numpy()), win)  # km/s, no RE factor
 
-    print('Using BALLISTIC propagation.')
+    #print('Using BALLISTIC propagation.')
     # Final travel time from the converged distance to the BSN (km / km/s = s)
     shift = raw['X'].to_numpy() / velsmooth
     raw['tshift'] = shift
@@ -148,7 +170,7 @@ for e in range(len(event_list)):
             lasttime = tshift[i]
         else:
             discard.append(i)
-    print(f'Removing "overtaken" points {len(discard)} of {len(tshift)} total.')
+    print(f'Removing "overtaken" points {len(discard)} of {len(tshift)} total for event {e+1}.')
 
 
     #Puts all the raw data into Upstream Dataframe
@@ -195,7 +217,7 @@ for e in range(len(event_list)):
     os.makedirs(folder_path, exist_ok=True)
     downstream.to_csv(f'{folder_path}/{date_string}.csv', index=False)
 
-    
+
     #imfout.attrs['header'].append(f'Source data: {file1}\n')
 
     imfout.attrs['header'].append('Ballistically propagated from L1 to ' +
@@ -234,3 +256,29 @@ for e in range(len(event_list)):
     path = os.path.join('./Plots/OutputProp',f'{date_start.strftime('%Y-%m-%d')}outputprop.png')
     os.makedirs(os.path.dirname(path), exist_ok=True)
     fig.savefig(path, dpi=300)
+
+    print(f'Finished processing event {e + 1}', flush=True)
+
+
+def prefetch(e):
+
+    print(f'Prefetching event {e + 1} of {len(event_list)}', flush=True)
+    start = pd.to_datetime(event_list['Date_Start'][e])
+    stop = pd.to_datetime(event_list['Date_Stop'][e])
+    pyspedas.projects.omni.data(trange=[(start - timedelta(minutes=180)).strftime(FMT),
+                                        stop.strftime(FMT)],
+                                datatype='1min', level='hro2', time_clip=True)
+
+def safe_process(e):
+    try:
+        process_event(e)
+    except Exception as ex:
+        print(f'FAILED event {e + 1}: {ex!r}', flush=True)
+
+if __name__ == '__main__':
+    for e in range(len(event_list)):
+        d = pd.to_datetime(event_list['Date_Start'][e]).strftime('%Y-%m-%d')
+        if args.force or not os.path.exists(f'./Plots/OutputProp/{d}outputprop.png'):
+            prefetch(e)
+    with Pool(processes=min(32, len(event_list)), maxtasksperchild=1) as pool:
+        pool.map(safe_process, range(len(event_list)))
